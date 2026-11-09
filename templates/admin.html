@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>业主白名单管理后台</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Microsoft YaHei", sans-serif; }
+        body { background-color: #f4f7f6; display: flex; height: 100vh; }
+
+        /* 侧边栏 */
+        .sidebar { width: 250px; background-color: #2b3643; color: #fff; display: flex; flex-direction: column; }
+        .sidebar h2 { padding: 20px; text-align: center; font-size: 20px; border-bottom: 1px solid #1f2833; background-color: #1f2833; }
+        .sidebar ul { list-style: none; margin-top: 20px; }
+        .sidebar ul li { padding: 15px 20px; cursor: pointer; transition: 0.3s; color: #a3b1c6; font-size: 16px; }
+        .sidebar ul li:hover, .sidebar ul li.active { background-color: #1f2833; color: #fff; border-left: 4px solid #3498db; }
+
+        /* 内容区 */
+        .content { flex: 1; padding: 30px; display: flex; flex-direction: column; overflow-y: auto; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; color: #333; }
+        .user-info { color: #666; font-size: 14px; }
+        .user-info a { color: #e74c3c; text-decoration: none; margin-left: 15px; }
+
+        /* 页面卡片 */
+        .page-view { display: none; }
+        .page-view.active { display: block; }
+
+        .action-bar { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; display: flex; justify-content: space-between; }
+        .search-box { display: flex; gap: 10px; }
+        .search-box input { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
+        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; color: #fff; background: #3498db; font-size: 14px; transition: 0.3s; }
+        .btn:hover { background: #2980b9; }
+        .btn-add { background: #2ecc71; }
+        .btn-add:hover { background: #27ae60; }
+        .btn-export { background: #f39c12; }
+        .btn-export:hover { background: #e67e22; }
+
+        .table-container { background: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); overflow: hidden; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #eee; }
+        th { background: #f8f9fa; color: #333; font-weight: bold; }
+        tr:hover { background: #f1f2f6; }
+
+        .pagination { display: flex; justify-content: flex-end; padding: 15px; gap: 5px; }
+        .pagination button { padding: 6px 12px; border: 1px solid #ddd; background: #fff; cursor: pointer; border-radius: 4px; }
+        .pagination button.active { background: #3498db; color: #fff; border-color: #3498db; }
+
+        /* 弹窗 */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;}
+        .modal-content { background: #fff; padding: 25px; border-radius: 8px; width: 400px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 8px; color: #555; font-size: 14px; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
+        .form-group input:focus { border-color: #3498db; }
+        .modal-actions { text-align: right; margin-top: 25px; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>PlateScope 后台</h2>
+        <ul>
+            <!-- 使用 onclick 切换页面 -->
+            <li id="tab-whitelist" class="active" onclick="switchTab('whitelist')">业主白名单管理</li>
+            <li id="tab-records" onclick="switchTab('records')">临停车辆记录</li>
+            <li id="tab-export" onclick="switchTab('export')">数据报表导出</li>
+        </ul>
+    </div>
+
+    <div class="content">
+        <div class="header">
+            <h1 id="page-title">固定车位业主白名单</h1>
+            <div class="user-info">管理员：Admin <a href="/logout">退出登录</a></div>
+        </div>
+
+        <!-- 页面 1：白名单管理 -->
+        <div id="view-whitelist" class="page-view active">
+            <div class="action-bar">
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="输入车牌号或姓名...">
+                    <button class="btn" onclick="fetchWhitelist(1)">查询</button>
+                </div>
+                <button class="btn btn-add" onclick="openModal()">+ 添加白名单</button>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>车牌号</th>
+                            <th>业主姓名</th>
+                            <th>月租到期时间</th>
+                            <th>缴费记录说明</th>
+                        </tr>
+                    </thead>
+                    <tbody id="whitelistBody"></tbody>
+                </table>
+                <div class="pagination" id="pagination"></div>
+            </div>
+        </div>
+
+        <!-- 页面 2：临停车辆记录 -->
+        <div id="view-records" class="page-view">
+            <div class="action-bar">
+                <div class="search-box">
+                    <input type="text" id="searchPlateInput" placeholder="按车牌搜索历史...">
+                    <button class="btn" onclick="fetchRecords(1)">查询</button>
+                </div>
+            </div>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>车牌号</th>
+                            <th>入场时间</th>
+                            <th>出场时间</th>
+                            <th>停车时长</th>
+                            <th>收费金额</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recordsBody"></tbody>
+                </table>
+                <div class="pagination" id="recordPagination"></div>
+            </div>
+        </div>
+
+        <!-- 页面 3：数据报表导出 -->
+        <div id="view-export" class="page-view">
+            <div style="background: #fff; padding: 40px; border-radius: 8px; text-align: center;">
+                <h3 style="margin-bottom: 20px; color: #333;">点击下方按钮导出所有临停车辆流水</h3>
+                <p style="color: #666; margin-bottom: 30px;">系统将把 SQLite 数据库中的数据转换为标准 CSV 格式文件，方便进一步进行 Excel 数据分析。</p>
+                <button class="btn btn-export" onclick="exportData()" style="padding: 15px 40px; font-size: 18px;">📥 一键导出 CSV 报表</button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 添加弹窗 -->
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <h3>录入新业主车位</h3>
+            <div class="form-group"><label>车牌号</label><input type="text" id="addPlate" placeholder="如：粤BGK9689"></div>
+            <div class="form-group"><label>业主姓名</label><input type="text" id="addOwner" placeholder="请输入姓名"></div>
+            <div class="form-group"><label>月租到期时间</label><input type="date" id="addExpire"></div>
+            <div class="form-group"><label>缴费说明</label><input type="text" id="addHistory" value="已缴纳半年停车费"></div>
+            <div class="modal-actions">
+                <button class="btn" style="background:#bdc3c7;" onclick="closeModal()">取消</button>
+                <button class="btn btn-add" onclick="submitForm()">确认添加</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+
+        // 页面 Tab 切换逻辑
+        function switchTab(tabName) {
+            document.querySelectorAll('.page-view').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.sidebar ul li').forEach(el => el.classList.remove('active'));
+
+            document.getElementById('view-' + tabName).classList.add('active');
+            document.getElementById('tab-' + tabName).classList.add('active');
+
+            if (tabName === 'whitelist') {
+                document.getElementById('page-title').innerText = "固定车位业主白名单";
+                fetchWhitelist(1);
+            } else if (tabName === 'records') {
+                document.getElementById('page-title').innerText = "临停车辆历史记录";
+                fetchRecords(1);
+            } else if (tabName === 'export') {
+                document.getElementById('page-title').innerText = "数据报表导出";
+            }
+        }
+
+        // 1. 白名单管理
+        function fetchWhitelist(page = 1) {
+            currentPage = page;
+            const search = document.getElementById('searchInput').value;
+            fetch(`/api/whitelist?page=${page}&search=${search}`)
+                .then(res => {
+                    if (res.status === 401) window.location.href = '/login';
+                    return res.json();
+                })
+                .then(data => {
+                    if(data.error) return;
+                    const tbody = document.getElementById('whitelistBody');
+                    if (data.data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">暂无数据</td></tr>';
+                    } else {
+                        tbody.innerHTML = data.data.map(item => `
+                            <tr>
+                                <td style="font-weight:bold; color:#3498db;">${item.plate}</td>
+                                <td>${item.owner}</td>
+                                <td>${item.expire}</td>
+                                <td>${item.history}</td>
+                            </tr>
+                        `).join('');
+                    }
+
+                    const totalPages = Math.ceil(data.total / 8);
+                    const pagDiv = document.getElementById('pagination');
+                    pagDiv.innerHTML = '';
+                    for (let i = 1; i <= totalPages; i++) {
+                        const btn = document.createElement('button');
+                        btn.innerText = i;
+                        if (i === page) btn.className = 'active';
+                        btn.onclick = () => fetchWhitelist(i);
+                        pagDiv.appendChild(btn);
+                    }
+                });
+        }
+
+        // 2. 临停记录查询
+        function fetchRecords(page = 1) {
+            const search = document.getElementById('searchPlateInput').value;
+            fetch(`/api/records?page=${page}&search=${search}`)
+                .then(res => res.json())
+                .then(data => {
+                    const tbody = document.getElementById('recordsBody');
+                    if (data.data.length === 0) {
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">暂无记录</td></tr>';
+                    } else {
+                        tbody.innerHTML = data.data.map(item => `
+                            <tr>
+                                <td>${item.id}</td>
+                                <td style="font-weight:bold; color:#3498db;">${item.plate}</td>
+                                <td>${item.entry}</td>
+                                <td>${item.exit}</td>
+                                <td>${item.duration} 小时</td>
+                                <td style="color:#e74c3c; font-weight:bold;">${item.fee} 元</td>
+                            </tr>
+                        `).join('');
+                    }
+
+                    const totalPages = Math.ceil(data.total / 8);
+                    const pagDiv = document.getElementById('recordPagination');
+                    pagDiv.innerHTML = '';
+                    for (let i = 1; i <= totalPages; i++) {
+                        const btn = document.createElement('button');
+                        btn.innerText = i;
+                        if (i === page) btn.className = 'active';
+                        btn.onclick = () => fetchRecords(i);
+                        pagDiv.appendChild(btn);
+                    }
+                });
+        }
+
+        // 3. 导出数据
+        function exportData() {
+            window.location.href = '/api/export';
+        }
+
+        // 弹窗逻辑
+        function openModal() { document.getElementById('addModal').style.display = 'flex'; }
+        function closeModal() { document.getElementById('addModal').style.display = 'none'; }
+
+        function submitForm() {
+            const plate = document.getElementById('addPlate').value.toUpperCase().replace('·','');
+            const owner = document.getElementById('addOwner').value;
+            const expire = document.getElementById('addExpire').value;
+            const history = document.getElementById('addHistory').value;
+
+            if(!plate || !owner || !expire) return alert("请填写完整信息！");
+
+            fetch('/api/whitelist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({plate, owner, expire, history})
+            }).then(res => res.json()).then(data => {
+                if(data.success) {
+                    alert('添加成功！');
+                    closeModal();
+                    fetchWhitelist(1);
+                } else {
+                    alert('添加失败：' + data.msg);
+                }
+            });
+        }
+
+        // 初始化加载
+        fetchWhitelist(1);
+    </script>
+</body>
+</html>

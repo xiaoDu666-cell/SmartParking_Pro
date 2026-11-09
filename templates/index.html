@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>PlateScope - 老旧小区门禁监控中心</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background-color: #060b14; color: #00d2ff; font-family: "Microsoft YaHei", sans-serif; overflow: hidden; height: 100vh; display: flex; flex-direction: column;}
+
+        /* 顶部导航 */
+        .header { height: 8vh; display: flex; justify-content: space-between; align-items: center; padding: 0 30px; font-size: 1.8vw; font-weight: bold; color: #fff; border-bottom: 2px solid #005f89; text-shadow: 0 0 15px #00d2ff; background: linear-gradient(90deg, transparent, rgba(0,210,255,0.1), transparent);}
+        .header a { color: #00ffcc; font-size: 1vw; text-decoration: none; border: 1px solid #00ffcc; padding: 8px 15px; border-radius: 5px; transition: 0.3s; text-shadow: none; }
+        .header a:hover { background: #00ffcc; color: #000; box-shadow: 0 0 15px #00ffcc;}
+
+        /* 预警横幅 */
+        .alert-banner { display: none; background: rgba(255, 68, 68, 0.2); border: 1px solid #ff4444; color: #ff4444; padding: 10px; text-align: center; font-weight: bold; font-size: 1vw; letter-spacing: 1px; animation: flash 1.5s infinite; }
+        @keyframes flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+        /* 主布局 */
+        .main-container { display: flex; height: 92vh; padding: 15px; gap: 15px; }
+        .left-panel { flex: 1.2; display: flex; flex-direction: column; gap: 15px; }
+        .center-panel { flex: 2.5; display: flex; flex-direction: column; gap: 15px; }
+        .right-panel { flex: 1; display: flex; flex-direction: column; gap: 15px; }
+
+        /* 卡片样式 */
+        .card { flex: 1; border: 1px solid #134b70; background: rgba(4, 20, 38, 0.8); padding: 15px; border-radius: 8px; display: flex; flex-direction: column; box-shadow: inset 0 0 15px rgba(0,210,255,0.05);}
+        .card-title { font-size: 1.1vw; font-weight: bold; border-bottom: 1px solid #00d2ff; padding-bottom: 8px; margin-bottom: 10px; color: #fff; display: flex; align-items: center;}
+        .card-title::before { content: ''; display: inline-block; width: 4px; height: 14px; background: #00d2ff; margin-right: 10px; border-radius: 2px; }
+
+        /* 视频区域 */
+        .video-box { flex: 1; border: 2px solid #005f89; border-radius: 8px; background: #000; position: relative; box-shadow: inset 0 0 30px #005f89; overflow: hidden;}
+        .video-box img { width: 100%; height: 100%; object-fit: contain; }
+        .video-info { position:absolute; top:15px; left:15px; background:rgba(0,0,0,0.7); padding:10px 20px; border-left:4px solid #00ffcc; border-radius: 4px;}
+        .video-info .title { color:#fff; font-size:1vw; font-weight: bold;}
+        .video-info .spaces { margin-top:5px; font-size:0.85vw; color: #8ab4f8;}
+        .video-info .spaces span { font-weight: bold; font-size: 1.2vw; color: #00ffcc; margin: 0 5px;}
+
+        /* KPI 数据 */
+        .kpi-row { display: flex; justify-content: space-between; text-align: center; margin-top: 10px;}
+        .kpi-item { flex: 1; }
+        .kpi-value { font-size: 2.2vw; color: #00ffcc; font-weight: bold; text-shadow: 0 0 10px rgba(0,255,204,0.5);}
+        .kpi-label { font-size: 0.8vw; color: #8ab4f8; }
+
+        /* 图表容器 */
+        .chart-container { width: 100%; flex: 1; min-height: 100px; }
+
+        /* 实时状态 */
+        .realtime-text { font-size: 2vw; font-weight: bold; text-align: center; margin: 10px 0; }
+        .realtime-desc { font-size: 1.1vw; text-align: center; }
+
+        /* 流水列表 */
+        .log-list { list-style: none; font-size: 0.9vw; }
+        .log-list li { padding: 8px 0; border-bottom: 1px dashed #134b70; display: flex; justify-content: space-between; color: #ccc; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>『PlateScope』 智慧小区门禁监控中心</div>
+        <a href="/admin">进入后台管理 ➔</a>
+    </div>
+
+    <!-- 车位满载预警横幅 -->
+    <div id="alert-banner" class="alert-banner">⚠️ 车位极度紧张！当前空余车位不足，建议采取外来车辆限流或错峰引导策略！</div>
+
+    <div class="main-container">
+        <!-- 左侧：数据分析 -->
+        <div class="left-panel">
+            <div class="card" style="flex: 0.8;">
+                <div class="card-title">系统宏观概览</div>
+                <div class="kpi-row">
+                    <div class="kpi-item"><div class="kpi-value" id="kpi-income">0.0</div><div class="kpi-label">临停营收 (元)</div></div>
+                    <div class="kpi-item"><div class="kpi-value" id="kpi-current">0</div><div class="kpi-label">场内临停</div></div>
+                    <div class="kpi-item"><div class="kpi-value" id="kpi-vip">0</div><div class="kpi-label">业主白名单</div></div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-title">24小时临停车流高峰</div>
+                <div id="hourlyChart" class="chart-container"></div>
+            </div>
+            <div class="card">
+                <div class="card-title">临停停车时长分布</div>
+                <div id="durationChart" class="chart-container"></div>
+            </div>
+        </div>
+
+        <!-- 中间：视频监控 -->
+        <div class="center-panel">
+            <div class="video-box">
+                <img src="/video_feed" alt="门禁视频流加载中...">
+                <div class="video-info">
+                    <div class="title">小区主门禁 (MAIN ENTRANCE)</div>
+                    <div class="spaces">
+                        总车位: <span>200</span> | 空余: <span id="remain-spaces">--</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧：实时判定与流水 -->
+        <div class="right-panel">
+            <div class="card" style="flex: 1;">
+                <div class="card-title">实时门禁判定</div>
+                <div class="realtime-text" style="color:#00ffcc;" id="log-plate">等待车辆</div>
+                <div class="realtime-desc" style="color:#8ab4f8;" id="log-status">正在监控中...</div>
+            </div>
+            <div class="card" style="flex: 1.5;">
+                <div class="card-title">最新临停出场流水</div>
+                <ul class="log-list" id="log-list"><li style="justify-content:center; padding:10px; color:#666;">暂无记录</li></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 初始化 ECharts
+        var hourlyChart = echarts.init(document.getElementById('hourlyChart'), 'dark');
+        var durationChart = echarts.init(document.getElementById('durationChart'), 'dark');
+
+        // 定时轮询数据
+        setInterval(() => {
+            // 1. 获取实时状态
+            fetch('/api/log').then(res => res.json()).then(data => {
+                if (data.plate !== "等待识别") {
+                    document.getElementById('log-plate').innerText = data.plate;
+                    document.getElementById('log-status').innerText = data.status;
+
+                    // 动态变色判断
+                    let color = "#00ffcc"; // 默认绿
+                    if (data.type === "vip") color = "#ffd700"; // 金色VIP
+                    if (data.type === "warning" || data.type === "exit") color = "#ff4444"; // 红色警告/出场
+                    document.getElementById('log-status').style.color = color;
+                }
+            });
+
+            // 2. 获取统计数据和图表
+            fetch('/api/stats').then(res => res.json()).then(data => {
+                // 更新 KPI
+                document.getElementById('kpi-income').innerText = data.total_income;
+                document.getElementById('kpi-current').innerText = data.current_count;
+                document.getElementById('kpi-vip').innerText = data.whitelist_count;
+
+                // 更新空余车位与预警
+                const totalSpaces = 200;
+                const remain = totalSpaces - data.current_count;
+                document.getElementById('remain-spaces').innerText = remain;
+
+                const alertBanner = document.getElementById('alert-banner');
+                if (remain <= 30) { // 剩余不足 30 个，触发预警
+                    alertBanner.style.display = 'block';
+                    if (remain <= 0) {
+                        alertBanner.innerText = "🚨 爆满警告！车位已满，请立即安排安保人员引导外围车辆离开！";
+                    } else {
+                        alertBanner.innerText = "⚠️ 车位极度紧张！当前空余车位不足 30，建议采取外来车辆限流或错峰引导策略！";
+                    }
+                } else {
+                    alertBanner.style.display = 'none';
+                }
+
+                // 更新流水列表
+                let html = "";
+                if(data.recent_records.length === 0) {
+                    html = '<li style="justify-content:center; padding:10px; color:#666;">暂无记录</li>';
+                } else {
+                    data.recent_records.forEach(r => {
+                        html += `<li><span style="color:#00d2ff; font-weight:bold;">${r.plate}</span><span style="color:#666;">${r.time.split(' ')[1]}</span><span style="color:#ff4444;">+${r.fee}元</span></li>`;
+                    });
+                }
+                document.getElementById('log-list').innerHTML = html;
+
+                // 更新柱状图 (车流)
+                hourlyChart.setOption({
+                    backgroundColor: 'transparent',
+                    grid: { top: 20, bottom: 20, left: 35, right: 10 },
+                    tooltip: { trigger: 'axis' },
+                    xAxis: { type: 'category', data: data.hours, axisLabel: { color: '#8ab4f8', fontSize: 10 } },
+                    yAxis: { type: 'value', axisLabel: { color: '#8ab4f8', fontSize: 10 }, splitLine: { lineStyle: { color: '#134b70', type: 'dashed' } } },
+                    series: [{ data: data.hour_counts, type: 'bar', itemStyle: { color: '#00d2ff', borderRadius: [4, 4, 0, 0] }, barWidth: '40%' }]
+                });
+
+                // 更新饼图 (时长)
+                durationChart.setOption({
+                    backgroundColor: 'transparent',
+                    tooltip: { trigger: 'item' },
+                    legend: { top: 'bottom', textStyle: { color: '#8ab4f8', fontSize: 10 } },
+                    series: [{ type: 'pie', radius: ['40%', '65%'], center: ['50%', '45%'], data: data.dur_values, label: { show: false }, color: ['#00d2ff', '#00ffcc', '#ffcc00', '#ff4444', '#9933ff'] }]
+                });
+            });
+        }, 1500);
+
+        // 窗口自适应
+        window.addEventListener('resize', () => { hourlyChart.resize(); durationChart.resize(); });
+    </script>
+</body>
+</html>
