@@ -1,4 +1,4 @@
-from flask import Flask, render_template, Response, jsonify, request, session, redirect, url_for,make_response
+from flask import Flask, render_template, Response, jsonify, request, session, redirect, url_for, make_response
 import cv2
 import numpy as np
 import re
@@ -12,8 +12,9 @@ import csv
 from io import StringIO
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_parking_key'  # 用于 session 加密
+app.secret_key = 'super_secret_parking_key'
 
+TOTAL_SPACES = 200
 
 
 # ================= 1. 数据库初始化 =================
@@ -21,28 +22,29 @@ def init_db():
     conn = sqlite3.connect('parking.db', check_same_thread=False)
     cursor = conn.cursor()
     cursor.execute('''CREATE TABLE IF NOT EXISTS current_vehicles (
-                        plate_number TEXT PRIMARY KEY, entry_time TEXT NOT NULL)''')
+                        plate_number TEXT PRIMARY KEY, entry_time TEXT NOT NULL, is_vip INTEGER DEFAULT 0)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS parking_records (
                         id INTEGER PRIMARY KEY AUTOINCREMENT, plate_number TEXT NOT NULL, 
                         entry_time TEXT NOT NULL, exit_time TEXT NOT NULL, 
-                        duration_hours REAL NOT NULL, fee REAL NOT NULL)''')
-
-    # 新增 status 字段 (0: 已缴费/正常, 1: 欠费)
+                        duration_hours REAL NOT NULL, fee REAL NOT NULL, phone TEXT)''')
     cursor.execute('''CREATE TABLE IF NOT EXISTS whitelist (
-                        plate_number TEXT PRIMARY KEY, 
-                        owner_name TEXT NOT NULL,
-                        expire_date TEXT NOT NULL,
-                        payment_history TEXT NOT NULL,
-                        status INTEGER DEFAULT 0)''')
-
-    # 防止旧数据库没这个字段导致报错
+                        plate_number TEXT PRIMARY KEY, owner_name TEXT NOT NULL, expire_date TEXT NOT NULL,
+                        payment_history TEXT NOT NULL, status INTEGER DEFAULT 0,
+                        phone TEXT, building TEXT, unit TEXT, room TEXT)''')
     try:
-        cursor.execute("ALTER TABLE whitelist ADD COLUMN status INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # 字段已存在
-
+        cursor.execute("ALTER TABLE parking_records ADD COLUMN phone TEXT")
+    except:
+        pass
+    cols = [("status", "INTEGER DEFAULT 0"), ("phone", "TEXT"), ("building", "TEXT"), ("unit", "TEXT"),
+            ("room", "TEXT")]
+    for col, dtype in cols:
+        try:
+            cursor.execute(f"ALTER TABLE whitelist ADD COLUMN {col} {dtype}")
+        except:
+            pass
     conn.commit()
     return conn
+
 
 conn = init_db()
 
@@ -52,17 +54,17 @@ yolo_model = YOLO('best.pt')
 ocr = PaddleOCR(lang="ch", enable_mkldnn=False)
 print("模型加载完毕！")
 
-# ================= 3. 单通道视频源 =================
-cap_main = cv2.VideoCapture(1)  # 假设只有一个门禁摄像头
-
+cap_main = cv2.VideoCapture(1)  # 这里如果是你的 iVCam 手机摄像头，改成 1
 active_plates = {}
 DISAPPEAR_TIMEOUT = 5
-latest_log = {"plate": "等待识别", "status": "门禁监控中", "time": "", "type": "normal"}
+# 全局状态：增加 need_phone 用于触发前端弹窗
+latest_log = {"plate": "等待识别", "status": "门禁监控中", "time": "", "type": "normal", "need_phone": False,
+              "temp_plate": "", "expire_date": ""}
 last_trigger_time = {}
 
 
 def put_chinese_text(img, text, position, textColor=(0, 255, 0), textSize=30):
-    if (isinstance(img, np.ndarray)):
+    if isinstance(img, np.ndarray):
         img = Image.fromarray(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img)
     try:
@@ -73,84 +75,102 @@ def put_chinese_text(img, text, position, textColor=(0, 255, 0), textSize=30):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 
-# ================= 4. 核心业务逻辑 =================
 def calculate_fee(duration_hours):
     if duration_hours <= 1: return 5.0
     return 5.0 + (duration_hours - 1) * 3.0
 
 
-# 全局车位总数（设置个大一点的车位）
-TOTAL_SPACES = 300
-
-
+# ================= 3. 核心业务逻辑 =================
 def process_vehicle(plate_text):
     global latest_log
     cursor = conn.cursor()
 
-    # ★ 修复问题 4：严格的国内车牌正则校验（防止乱码入库）
-    # 匹配规则：省份汉字 + 字母 + 5位字母数字（包括新能源8位）
     plate_regex = r'^[京津冀晋蒙辽吉黑沪苏浙皖闽赣鲁豫鄂湘粤桂琼渝川贵云藏陕甘青宁新]{1}[A-Z]{1}[A-Z0-9]{5,6}$'
     if not re.match(plate_regex, plate_text):
         latest_log = {"plate": plate_text, "status": "非合法车牌，拒绝录入", "time": datetime.now().strftime("%H:%M:%S"),
-                      "type": "warning"}
-        return  # 直接终止，不写库
+                      "type": "warning", "need_phone": False, "temp_plate": "", "expire_date": ""}
+        return
 
-    # 1. 判定是否为白名单业主
-    cursor.execute("SELECT expire_date, status FROM whitelist WHERE plate_number = ?", (plate_text,))
-    whitelist_result = cursor.fetchone()
-
-    if whitelist_result:
-        now_date = datetime.now().strftime("%Y-%m-%d")
-        expire_date = whitelist_result[0]
-        is_owe = whitelist_result[1] == 1
-
-        if expire_date >= now_date and not is_owe:
-            latest_log = {"plate": plate_text, "status": "业主月租车，直接放行",
-                          "time": datetime.now().strftime("%H:%M:%S"), "type": "vip"}
-            return
-        else:
-            latest_log = {"plate": plate_text, "status": "业主欠费或已到期，请缴费通行",
-                          "time": datetime.now().strftime("%H:%M:%S"), "type": "warning"}
-            return  # ★ 修复问题 3：欠费直接拒绝放行，不再走临停逻辑
-
-    # 2. 临停车辆处理
-    cursor.execute("SELECT entry_time FROM current_vehicles WHERE plate_number = ?", (plate_text,))
+    cursor.execute("SELECT entry_time, is_vip FROM current_vehicles WHERE plate_number = ?", (plate_text,))
     result = cursor.fetchone()
     now = datetime.now()
     now_str = now.strftime("%Y-%m-%d %H:%M:%S")
 
-    if result:
-        # 出场
-        entry_time = datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S")
-        duration_hours = max(1, round((now - entry_time).total_seconds() / 3600))
-        fee = calculate_fee(duration_hours)
-        cursor.execute("DELETE FROM current_vehicles WHERE plate_number = ?", (plate_text,))
-        cursor.execute('''INSERT INTO parking_records (plate_number, entry_time, exit_time, duration_hours, fee)
-                          VALUES (?, ?, ?, ?, ?)''', (plate_text, result[0], now_str, duration_hours, fee))
-        conn.commit()
-        latest_log = {"plate": plate_text, "status": f"临停出场，收费 {fee} 元", "time": now.strftime("%H:%M:%S"),
-                      "type": "exit"}
-    else:
-        # 入场（检查车位是否已满）
+    if not result:
+        # 【入场逻辑】
+        cursor.execute("SELECT expire_date, status FROM whitelist WHERE plate_number = ?", (plate_text,))
+        whitelist_result = cursor.fetchone()
+
+        if whitelist_result:
+            expire_date, vip_status = whitelist_result
+            now_date = datetime.now().strftime("%Y-%m-%d")
+            if expire_date >= now_date and vip_status == 0:
+                # 业主直接放行入库
+                cursor.execute("INSERT INTO current_vehicles (plate_number, entry_time, is_vip) VALUES (?, ?, 1)",
+                               (plate_text, now_str))
+                conn.commit()
+                latest_log = {"plate": plate_text, "status": "业主月租车，直接放行", "time": now.strftime("%H:%M:%S"),
+                              "type": "vip", "need_phone": False, "temp_plate": "", "expire_date": expire_date}
+                return
+            else:
+                latest_log = {"plate": plate_text, "status": "业主欠费/到期，请缴费通行",
+                              "time": now.strftime("%H:%M:%S"), "type": "warning", "need_phone": False,
+                              "temp_plate": "", "expire_date": expire_date}
+                return
+
         cursor.execute("SELECT COUNT(*) FROM current_vehicles")
-        current_count = cursor.fetchone()[0]
-        if current_count >= TOTAL_SPACES:
+        if cursor.fetchone()[0] >= TOTAL_SPACES:
             latest_log = {"plate": plate_text, "status": "车位已满，禁止入场", "time": now.strftime("%H:%M:%S"),
-                          "type": "warning"}
+                          "type": "warning", "need_phone": False, "temp_plate": "", "expire_date": ""}
             return
 
-        cursor.execute("INSERT INTO current_vehicles (plate_number, entry_time) VALUES (?, ?)", (plate_text, now_str))
+        # ★ 关键修改：临停车辆不直接入库，先触发前端弹窗
+        latest_log = {"plate": plate_text, "status": "临停车辆，请扫码登记手机号", "time": now.strftime("%H:%M:%S"),
+                      "type": "entry", "need_phone": True, "temp_plate": plate_text, "expire_date": ""}
+        return
+
+    else:
+        # 【出场逻辑】
+        entry_time = datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S")
+        is_vip = result[1]
+
+        # 10秒内重复识别不处理
+        if (now - entry_time).total_seconds() < 10:
+            latest_log = {"plate": plate_text, "status": "车辆已入场，请勿重复识别", "time": now.strftime("%H:%M:%S"),
+                          "type": "normal", "need_phone": False, "temp_plate": "", "expire_date": ""}
+            return
+
+        if not is_vip:
+            duration_hours = max(1, round((now - entry_time).total_seconds() / 3600))
+            fee = calculate_fee(duration_hours)
+
+            # 从数据库取这辆车的手机号（入场时已经写入了）
+            cursor.execute("SELECT phone FROM parking_records WHERE plate_number = ? ORDER BY id DESC LIMIT 1",
+                           (plate_text,))
+            phone_row = cursor.fetchone()
+            actual_phone = phone_row[0] if phone_row else "未登记"
+
+            cursor.execute('''INSERT INTO parking_records (plate_number, entry_time, exit_time, duration_hours, fee, phone)
+                              VALUES (?, ?, ?, ?, ?, ?)''',
+                           (plate_text, result[0], now_str, duration_hours, fee, actual_phone))
+            latest_log = {"plate": plate_text, "status": f"出场成功，时长{duration_hours}小时，收费{fee}元",
+                          "time": now.strftime("%H:%M:%S"), "type": "exit", "need_phone": False, "temp_plate": "",
+                          "expire_date": ""}
+        else:
+            latest_log = {"plate": plate_text, "status": "业主月租车，出场放行", "time": now.strftime("%H:%M:%S"),
+                          "type": "vip", "need_phone": False, "temp_plate": "", "expire_date": ""}
+
+        cursor.execute("DELETE FROM current_vehicles WHERE plate_number = ?", (plate_text,))
         conn.commit()
-        latest_log = {"plate": plate_text, "status": "临时车辆入场", "time": now.strftime("%H:%M:%S"), "type": "entry"}
+
 
 def generate_frames():
     global active_plates
     while True:
         success, frame = cap_main.read()
         if not success:
-            time.sleep(0.1);
+            time.sleep(0.1)
             continue
-
         now_ts = time.time()
         keys_to_remove = [k for k, v in active_plates.items() if now_ts - v > DISAPPEAR_TIMEOUT]
         for k in keys_to_remove: del active_plates[k]
@@ -201,67 +221,101 @@ def generate_frames():
         yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
 
-# ================= 5. 路由与 API =================
+# ================= 4. 路由 API =================
 @app.route('/')
-def index():
-    return render_template('index.html')
+def index(): return render_template('index.html')
 
 
 @app.route('/api/log')
-def get_log():
-    return jsonify(latest_log)
+def get_log(): return jsonify(latest_log)
 
 
 @app.route('/video_feed')
-def video_feed():
-    return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+def video_feed(): return Response(generate_frames(), mimetype='multipart/x-mixed-replace; boundary=frame')
+
+
+# ★ 关键修改：接收手机号后，真正执行入场写库操作
+@app.route('/api/register_phone', methods=['POST'])
+def register_phone():
+    data = request.json
+    plate = data.get('plate')
+    phone = data.get('phone')
+
+    if plate and phone:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor = conn.cursor()
+        try:
+            # 真正写入在场表
+            cursor.execute("INSERT INTO current_vehicles (plate_number, entry_time, is_vip) VALUES (?, ?, 0)",
+                           (plate, now_str))
+            # 预插入一条流水记录，把手机号存进去，出场时直接更新出场时间和费用
+            cursor.execute('''INSERT INTO parking_records (plate_number, entry_time, exit_time, duration_hours, fee, phone)
+                              VALUES (?, ?, ?, ?, ?, ?)''',
+                           (plate, now_str, "--:--:--", 0, 0, phone))
+            conn.commit()
+
+            global latest_log
+            latest_log = {"plate": plate, "status": "登记成功，闸机已开启", "time": datetime.now().strftime("%H:%M:%S"),
+                          "type": "entry", "need_phone": False, "temp_plate": "", "expire_date": ""}
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "msg": str(e)}), 500
+    return jsonify({"success": False}), 400
+
+
+# 取消手机号登记接口（点了 X 关闭弹窗时调用，清理状态，防止车进不去）
+@app.route('/api/cancel_phone', methods=['POST'])
+def cancel_phone():
+    global latest_log
+    latest_log = {"plate": "等待识别", "status": "门禁监控中", "time": datetime.now().strftime("%H:%M:%S"),
+                  "type": "normal", "need_phone": False, "temp_plate": "", "expire_date": ""}
+    return jsonify({"success": True})
 
 
 @app.route('/api/stats')
 def get_stats():
     conn = sqlite3.connect('parking.db', check_same_thread=False)
     cursor = conn.cursor()
-
-    # 1. 核心指标 (针对小区：临停收费、场内临停、白名单总数)
-    cursor.execute("SELECT COUNT(*) FROM current_vehicles")
-    current_count = cursor.fetchone()[0]
-    cursor.execute("SELECT SUM(fee) FROM parking_records")
+    cursor.execute("SELECT COUNT(*) FROM current_vehicles WHERE is_vip = 0")
+    temp_current = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM current_vehicles WHERE is_vip = 1")
+    vip_current = cursor.fetchone()[0]
+    cursor.execute("SELECT SUM(fee) FROM parking_records WHERE exit_time != '--:--:--'")
     total_income = cursor.fetchone()[0] or 0.0
     cursor.execute("SELECT COUNT(*) FROM whitelist")
     whitelist_count = cursor.fetchone()[0]
 
-    # 2. 24小时临停车流高峰分析
-    cursor.execute("""
-        SELECT substr(exit_time, 12, 2) as hour, COUNT(*) as count 
-        FROM parking_records GROUP BY hour ORDER BY hour
-    """)
+    cursor.execute(
+        "SELECT substr(exit_time, 1, 10) as date, SUM(fee) as revenue FROM parking_records WHERE exit_time >= date('now', '-7 days') AND exit_time != '--:--:--' GROUP BY date ORDER BY date")
+    trend_data = cursor.fetchall()
+    cursor.execute(
+        "SELECT substr(exit_time, 12, 2) as hour, COUNT(*) as count FROM parking_records WHERE exit_time != '--:--:--' GROUP BY hour ORDER BY hour")
     hour_data = cursor.fetchall()
-    hours = [f"{row[0]}点" for row in hour_data]
-    hour_counts = [row[1] for row in hour_data]
-
-    # 3. 停车时长占比分析
-    cursor.execute("SELECT duration_hours, COUNT(*) FROM parking_records GROUP BY duration_hours")
+    cursor.execute(
+        "SELECT duration_hours, COUNT(*) FROM parking_records WHERE exit_time != '--:--:--' GROUP BY duration_hours")
     dur_data = cursor.fetchall()
-    dur_values = [{"name": f"{row[0]}小时", "value": row[1]} for row in dur_data]
-
-    # 4. 最新流水前5
-    cursor.execute("SELECT plate_number, exit_time, fee FROM parking_records ORDER BY id DESC LIMIT 5")
-    recent_records = [{"plate": row[0], "time": row[1], "fee": row[2]} for row in cursor.fetchall()]
+    cursor.execute(
+        "SELECT plate_number, exit_time, fee FROM parking_records WHERE exit_time != '--:--:--' ORDER BY id DESC LIMIT 5")
+    recent_records = cursor.fetchall()
 
     return jsonify({
-        "current_count": current_count, "total_income": round(total_income, 2), "whitelist_count": whitelist_count,
-        "hours": hours, "hour_counts": hour_counts, "dur_values": dur_values, "recent_records": recent_records
+        "temp_current": temp_current, "vip_current": vip_current,
+        "total_income": round(total_income, 2), "whitelist_count": whitelist_count,
+        "hours": [f"{r[0]}点" for r in hour_data], "hour_counts": [r[1] for r in hour_data],
+        "dur_values": [{"name": f"{r[0]}小时", "value": r[1]} for r in dur_data],
+        "recent_records": [{"plate": r[0], "time": r[1], "fee": r[2]} for r in recent_records],
+        "trend_dates": [r[0] for r in trend_data], "trend_incomes": [r[1] for r in trend_data],
+        "total_spaces": TOTAL_SPACES
     })
 
 
-# --- 后台登录鉴权 ---
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         if request.form.get('password') == 'admin123':
             session['is_admin'] = True
             return redirect(url_for('admin'))
-        return render_template('login.html', error="密码错误，请重试")
+        return render_template('login.html', error="密码错误")
     return render_template('login.html')
 
 
@@ -271,112 +325,127 @@ def logout():
     return redirect(url_for('login'))
 
 
-# --- 受保护的后台管理页面 ---
 @app.route('/admin')
 def admin():
-    if not session.get('is_admin'):
-        return redirect(url_for('login'))
+    if not session.get('is_admin'): return redirect(url_for('login'))
     return render_template('admin.html')
 
 
-# --- 白名单 API (受保护) ---
-@app.route('/api/whitelist', methods=['GET', 'POST'])
+@app.route('/api/whitelist', methods=['GET', 'POST', 'PUT', 'DELETE'])
 def manage_whitelist():
-    if not session.get('is_admin'):
-        return jsonify({"error": "未授权"}), 401
-
+    if not session.get('is_admin'): return jsonify({"error": "未授权"}), 401
     conn = sqlite3.connect('parking.db', check_same_thread=False)
     cursor = conn.cursor()
-
     if request.method == 'GET':
         page = int(request.args.get('page', 1))
         search = request.args.get('search', '')
-        limit = 8
-        offset = (page - 1) * limit
-
-        query = "SELECT * FROM whitelist"
+        limit, offset = 7, (page - 1) * 7
+        query = "SELECT plate_number, owner_name, expire_date, payment_history, phone, building, unit, room FROM whitelist"
         count_query = "SELECT COUNT(*) FROM whitelist"
         params = []
-
         if search:
-            query += " WHERE plate_number LIKE ? OR owner_name LIKE ?"
-            count_query += " WHERE plate_number LIKE ? OR owner_name LIKE ?"
-            params = [f"%{search}%", f"%{search}%"]
-
+            query += " WHERE plate_number LIKE ? OR owner_name LIKE ? OR building LIKE ?"
+            count_query += " WHERE plate_number LIKE ? OR owner_name LIKE ? OR building LIKE ?"
+            params = [f"%{search}%", f"%{search}%", f"%{search}%"]
         cursor.execute(count_query, params)
         total = cursor.fetchone()[0]
-
         query += " LIMIT ? OFFSET ?"
         cursor.execute(query, params + [limit, offset])
         rows = cursor.fetchall()
-
-        data = [{"plate": r[0], "owner": r[1], "expire": r[2], "history": r[3]} for r in rows]
+        data = [{"plate": r[0], "owner": r[1], "expire": r[2], "history": r[3], "phone": r[4] or "未填写",
+                 "building": r[5] or "未填写", "unit": r[6] or "未填写", "room": r[7] or "未填写"} for r in rows]
         return jsonify({"data": data, "total": total})
-
     elif request.method == 'POST':
         data = request.json
         try:
             cursor.execute(
-                "INSERT INTO whitelist (plate_number, owner_name, expire_date, payment_history) VALUES (?, ?, ?, ?)",
-                (data['plate'], data['owner'], data['expire'], data['history']))
+                """INSERT INTO whitelist (plate_number, owner_name, expire_date, payment_history, phone, building, unit, room, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (data['plate'], data['owner'], data['expire'], data['history'], data['phone'], data['building'],
+                 data['unit'], data['room'], data.get('status', 0)))
             conn.commit()
             return jsonify({"success": True})
         except sqlite3.IntegrityError:
-            return jsonify({"success": False, "msg": "该车牌已存在！"}), 400
+            return jsonify({"success": False, "msg": "该车牌号已存在"}), 400
+    elif request.method == 'PUT':
+        data = request.json
+        try:
+            cursor.execute(
+                """UPDATE whitelist SET owner_name=?, expire_date=?, payment_history=?, phone=?, building=?, unit=?, room=?, status=? WHERE plate_number=?""",
+                (data['owner'], data['expire'], data['history'], data['phone'], data['building'], data['unit'],
+                 data['room'], data.get('status', 0), data['plate']))
+            conn.commit()
+            return jsonify({"success": True})
+        except Exception as e:
+            return jsonify({"success": False, "msg": str(e)}), 400
+    elif request.method == 'DELETE':
+        plate = request.args.get('plate')
+        if plate:
+            cursor.execute("DELETE FROM whitelist WHERE plate_number = ?", (plate,))
+            conn.commit()
+            return jsonify({"success": True})
+        return jsonify({"success": False, "msg": "参数缺失"}), 400
 
 
-# 新增：临停记录分页查询 API
 @app.route('/api/records')
 def get_records():
     if not session.get('is_admin'): return jsonify({"error": "未授权"}), 401
     conn = sqlite3.connect('parking.db', check_same_thread=False)
     cursor = conn.cursor()
-
     page = int(request.args.get('page', 1))
-    search = request.args.get('search', '')
-    limit = 8
-    offset = (page - 1) * limit
+    search_plate = request.args.get('plate', '')
+    search_phone = request.args.get('phone', '')
+    limit, offset = 7, (page - 1) * 7
 
-    query = "SELECT id, plate_number, entry_time, exit_time, duration_hours, fee FROM parking_records"
-    count_query = "SELECT COUNT(*) FROM parking_records"
+    base_query = """
+        SELECT id, plate_number, entry_time, exit_time, duration_hours, fee, phone,
+               CASE WHEN exit_time = '--:--:--' THEN 1 ELSE 0 END as is_inside
+        FROM parking_records
+        WHERE 1=1
+    """
+    count_query = "SELECT COUNT(*) FROM parking_records WHERE 1=1"
     params = []
 
-    if search:
-        query += " WHERE plate_number LIKE ?"
-        count_query += " WHERE plate_number LIKE ?"
-        params = [f"%{search}%"]
+    if search_plate:
+        base_query += " AND plate_number LIKE ?"
+        count_query += " AND plate_number LIKE ?"
+        params.append(f"%{search_plate}%")
+    if search_phone:
+        base_query += " AND phone LIKE ?"
+        count_query += " AND phone LIKE ?"
+        params.append(f"%{search_phone}%")
 
     cursor.execute(count_query, params)
     total = cursor.fetchone()[0]
 
-    query += " ORDER BY id DESC LIMIT ? OFFSET ?"
-    cursor.execute(query, params + [limit, offset])
+    final_query = base_query + " ORDER BY entry_time DESC LIMIT ? OFFSET ?"
+    cursor.execute(final_query, params + [limit, offset])
     rows = cursor.fetchall()
 
-    data = [{"id": r[0], "plate": r[1], "entry": r[2], "exit": r[3], "duration": r[4], "fee": r[5]} for r in rows]
+    data = [{
+        "id": r[0], "plate": r[1], "entry": r[2], "exit": r[3],
+        "duration": r[4], "fee": r[5], "phone": r[6] or "未登记", "is_inside": r[7]
+    } for r in rows]
+
     return jsonify({"data": data, "total": total})
 
 
-# 新增：数据导出 CSV API
 @app.route('/api/export')
 def export_records():
     if not session.get('is_admin'): return "未授权", 401
     conn = sqlite3.connect('parking.db', check_same_thread=False)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, plate_number, entry_time, exit_time, duration_hours, fee FROM parking_records")
-    rows = cursor.fetchall()
-
-    # 生成 CSV 文件
+    # 只导出真正出场的流水
+    cursor.execute(
+        "SELECT id, plate_number, entry_time, exit_time, duration_hours, fee, phone FROM parking_records WHERE exit_time != '--:--:--'")
     si = StringIO()
     cw = csv.writer(si)
-    # 写入表头 (utf-8-sig 是为了防止 Excel 打开乱码)
-    cw.writerow(['记录ID', '车牌号', '入场时间', '出场时间', '停车时长(小时)', '收费(元)'])
-    cw.writerows(rows)
-
+    cw.writerow(['记录ID', '车牌号', '入场时间', '出场时间', '停车时长(小时)', '收费(元)', '手机号'])
+    cw.writerows(cursor.fetchall())
     output = make_response(si.getvalue().encode('utf-8-sig'))
     output.headers["Content-Disposition"] = "attachment; filename=parking_records.csv"
     output.headers["Content-type"] = "text/csv"
     return output
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)

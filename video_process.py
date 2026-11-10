@@ -1,13 +1,11 @@
 import cv2
 import os
-import time
 import re
 import numpy as np
 from ultralytics import YOLO
 from paddleocr import PaddleOCR
 from PIL import Image, ImageDraw, ImageFont
 
-# 创建保存素材的文件夹
 SAVE_DIR = "ppt_materials"
 if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
@@ -15,6 +13,7 @@ if not os.path.exists(SAVE_DIR):
 print("正在加载 AI 模型...")
 yolo_model = YOLO('best.pt')
 ocr = PaddleOCR(lang="ch", enable_mkldnn=False)
+print("模型加载完毕！")
 
 
 def put_chinese_text(img, text, position, textColor=(0, 255, 0), textSize=30):
@@ -29,66 +28,87 @@ def put_chinese_text(img, text, position, textColor=(0, 255, 0), textSize=30):
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 
-# 修改为你本地视频的路径
-video_path = "car_video.mp4"
+video_path = "test_images/test_video.mp4"
 cap = cv2.VideoCapture(video_path)
 
-save_count = 0
+if not cap.isOpened():
+    print(f"❌ 错误：无法打开视频文件 {video_path}")
+    exit()
+
+fps = cap.get(cv2.CAP_PROP_FPS)
+if fps <= 0 or fps > 60: fps = 25
+delay = int(1000 / fps)
+
+# 读取第一帧用于手动框选
+ret, first_frame = cap.read()
+if not ret: exit()
+
+print("请用鼠标在第一帧画面中框出车牌（框选后按空格/回车确认）...")
+# 让用户手动框选车牌
+roi = cv2.selectROI("Select Plate ROI (Press Enter/Space to confirm)", first_frame, showCrosshair=True,
+                    fromCenter=False)
+cv2.destroyWindow("Select Plate ROI (Press Enter/Space to confirm)")
+
+# 解包手动框选的坐标
+tx, ty, tw, th = int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3])
+print(f"已锁定坐标: X={tx}, Y={ty}, 宽={tw}, 高={th}")
+
+last_plate_text = ""
+
+# 重新读取视频开头
+cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+frame_count = 0
+
 while True:
     success, frame = cap.read()
     if not success: break
 
-    # 降低检测频率
-    if int(time.time() * 10) % 3 == 0:
-        results = yolo_model(frame, verbose=False)
-        for r in results:
-            for box in r.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                pad_x = int((x2 - x1) * 0.08)
-                pad_y = int((y2 - y1) * 0.15)
-                cx1, cy1 = max(0, x1 - pad_x), max(0, y1 - pad_y)
-                cx2, cy2 = min(frame.shape[1], x2 + pad_x), min(frame.shape[0], y2 + pad_y)
+    # 每一帧都在你框定的区域内进行裁剪识别
+    # 加入一点边界外扩，确保车牌边缘不被切掉
+    pad = 10
+    cx1 = max(0, tx - pad)
+    cy1 = max(0, ty - pad)
+    cx2 = min(frame.shape[1], tx + tw + pad)
+    cy2 = min(frame.shape[0], ty + th + pad)
 
-                plate_img = frame[cy1:cy2, cx1:cx2]
-                if plate_img.size == 0: continue
+    plate_img = frame[cy1:cy2, cx1:cx2]
 
-                # 模糊度检测
-                gray = cv2.cvtColor(plate_img, cv2.COLOR_BGR2GRAY)
-                if cv2.Laplacian(gray, cv2.CV_64F).var() < 40: continue
+    # 每隔 3 帧识别一次，保证流畅
+    if frame_count % 3 == 0 and plate_img.size > 0:
+        plate_img_large = cv2.resize(plate_img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+        ocr_result = ocr.predict(plate_img_large)
 
-                plate_img_large = cv2.resize(plate_img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-                ocr_result = ocr.predict(plate_img_large)
+        if ocr_result and 'rec_texts' in ocr_result[0]:
+            res = ocr_result[0]
+            text_blocks = []
+            if 'rec_polys' in res:
+                for text, poly in zip(res['rec_texts'], res['rec_polys']):
+                    min_x = int(min(p[0] for p in poly))
+                    text_blocks.append((min_x, text))
+                text_blocks.sort(key=lambda x: x[0])
+                raw_text = "".join([t[1] for t in text_blocks])
+            else:
+                raw_text = "".join(res['rec_texts'])
 
-                if ocr_result and 'rec_texts' in ocr_result[0]:
-                    res = ocr_result[0]
-                    text_blocks = []
-                    if 'rec_polys' in res:
-                        for text, poly in zip(res['rec_texts'], res['rec_polys']):
-                            min_x = int(min(p[0] for p in poly))
-                            text_blocks.append((min_x, text))
-                        text_blocks.sort(key=lambda x: x[0])
-                        raw_text = "".join([t[1] for t in text_blocks])
-                    else:
-                        raw_text = "".join(res['rec_texts'])
+            plate_text = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9]', '', raw_text)
+            if len(plate_text) >= 7:
+                last_plate_text = plate_text
+                print(f"[帧 {frame_count}] 识别: {last_plate_text}")
 
-                    plate_text = re.sub(r'[^\u4e00-\u9fa5A-Za-z0-9]', '', raw_text)
+    # 画图展示
+    if last_plate_text != "":
+        cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (0, 255, 0), 2)
+        frame = put_chinese_text(frame, last_plate_text, (cx1, cy1 - 35), textColor=(0, 255, 0))
 
-                    if len(plate_text) >= 7:
-                        cv2.rectangle(frame, (cx1, cy1), (cx2, cy2), (0, 255, 0), 2)
-                        frame = put_chinese_text(frame, plate_text, (cx1, cy1 - 35), textColor=(0, 255, 0))
+        # 保存 PPT 素材
+        if frame_count % 30 == 0:
+            cv2.imwrite(f"{SAVE_DIR}/video_frame_{frame_count}.jpg", frame)
 
-                        # 🌟 每隔一段保存一帧作为 PPT 素材
-                        if save_count % 15 == 0:
-                            cv2.imwrite(f"{SAVE_DIR}/frame_yolo_{save_count}.jpg", frame)  # 包含全车和框
-                            cv2.imwrite(f"{SAVE_DIR}/frame_plate_{save_count}.jpg", plate_img)  # 只有纯车牌
-                            with open(f"{SAVE_DIR}/frame_text_{save_count}.txt", "w") as f:
-                                f.write(f"原始输出: {res['rec_texts']}\n最终车牌: {plate_text}")
-                        save_count += 1
-
-    cv2.imshow("Video Processing", frame)
-    if cv2.waitKey(1) & 0xFF == 27:  # 按 ESC 退出
+    cv2.imshow("Plate Recognition Video", frame)
+    if cv2.waitKey(delay) & 0xFF == 27:
         break
+    frame_count += 1
 
 cap.release()
 cv2.destroyAllWindows()
-print(f"处理完毕！所有素材已存入 {SAVE_DIR} 文件夹。")
+print("处理完毕！")

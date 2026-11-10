@@ -2,281 +2,594 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>业主白名单管理后台</title>
+    <title>PlateScope - 智慧社区管理后台</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Microsoft YaHei", sans-serif; }
-        body { background-color: #f4f7f6; display: flex; height: 100vh; }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; }
+        body { background-color: #f0f2f5; display: flex; height: 100vh; color: #333; overflow: hidden; }
 
-        /* 侧边栏 */
-        .sidebar { width: 250px; background-color: #2b3643; color: #fff; display: flex; flex-direction: column; }
-        .sidebar h2 { padding: 20px; text-align: center; font-size: 20px; border-bottom: 1px solid #1f2833; background-color: #1f2833; }
-        .sidebar ul { list-style: none; margin-top: 20px; }
-        .sidebar ul li { padding: 15px 20px; cursor: pointer; transition: 0.3s; color: #a3b1c6; font-size: 16px; }
-        .sidebar ul li:hover, .sidebar ul li.active { background-color: #1f2833; color: #fff; border-left: 4px solid #3498db; }
+        /* ================= 左侧边栏（高级质感） ================= */
+        .sidebar { width: 230px; background-color: #304156; display: flex; flex-direction: column; transition: width 0.3s; box-shadow: 2px 0 6px rgba(0,21,41,.35); z-index: 100; }
+        .sidebar-logo { height: 60px; line-height: 60px; display: flex; align-items: center; justify-content: center; background-color: #2b2f3a; color: #fff; font-size: 18px; font-weight: bold; letter-spacing: 1px;}
+        .sidebar-logo span { color: #409EFF; margin-right: 5px; font-size: 20px;}
 
-        /* 内容区 */
-        .content { flex: 1; padding: 30px; display: flex; flex-direction: column; overflow-y: auto; }
-        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-        .header h1 { font-size: 24px; color: #333; }
-        .user-info { color: #666; font-size: 14px; }
-        .user-info a { color: #e74c3c; text-decoration: none; margin-left: 15px; }
+        .menu-list { list-style: none; padding: 10px 0; flex: 1; overflow-y: auto;}
+        .menu-item { padding: 0 20px; height: 50px; line-height: 50px; color: #bfcbd9; cursor: pointer; font-size: 14px; display: flex; align-items: center; transition: all 0.3s; }
+        .menu-item:hover { background-color: #263445; color: #409EFF; }
+        .menu-item.active { background-color: #1f2d3d; color: #409EFF; border-left: 4px solid #409EFF; padding-left: 16px;}
+        .menu-icon { margin-right: 10px; font-size: 16px; }
 
-        /* 页面卡片 */
-        .page-view { display: none; }
-        .page-view.active { display: block; }
+        /* ================= 右侧主内容区 ================= */
+        .content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 
-        .action-bar { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; display: flex; justify-content: space-between; }
-        .search-box { display: flex; gap: 10px; }
-        .search-box input { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
-        .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; color: #fff; background: #3498db; font-size: 14px; transition: 0.3s; }
-        .btn:hover { background: #2980b9; }
-        .btn-add { background: #2ecc71; }
-        .btn-add:hover { background: #27ae60; }
-        .btn-export { background: #f39c12; }
-        .btn-export:hover { background: #e67e22; }
+        /* 顶部导航 (面包屑) */
+        .top-nav { height: 50px; background: #fff; display: flex; justify-content: space-between; align-items: center; padding: 0 20px; box-shadow: 0 1px 4px rgba(0,21,41,.08); z-index: 10; }
+        .breadcrumb { font-size: 14px; color: #606266; display: flex; align-items: center;}
+        .breadcrumb span { color: #97a8be; margin: 0 10px;}
+        .user-info { font-size: 14px; color: #606266; display: flex; align-items: center; gap: 15px;}
+        .user-tag { background: #e6f1fc; color: #409EFF; padding: 2px 8px; border-radius: 4px; font-size: 12px; border: 1px solid #b3d8ff; }
+        .btn-logout { padding: 6px 15px; border: 1px solid #dcdfe6; background: #fff; border-radius: 4px; cursor: pointer; color: #606266; transition: all 0.2s; font-size: 13px;}
+        .btn-logout:hover { color: #409EFF; border-color: #c6e2ff; background-color: #ecf5ff; }
 
-        .table-container { background: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); overflow: hidden; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 15px; text-align: left; border-bottom: 1px solid #eee; }
-        th { background: #f8f9fa; color: #333; font-weight: bold; }
-        tr:hover { background: #f1f2f6; }
+        /* 工作区 */
+        .main-wrapper { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 15px; }
+        .page-view { display: none; flex-direction: column; gap: 15px; }
+        .page-view.active { display: flex; }
 
-        .pagination { display: flex; justify-content: flex-end; padding: 15px; gap: 5px; }
-        .pagination button { padding: 6px 12px; border: 1px solid #ddd; background: #fff; cursor: pointer; border-radius: 4px; }
-        .pagination button.active { background: #3498db; color: #fff; border-color: #3498db; }
+        /* 卡片化设计 */
+        .card { background: #fff; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,21,41,.08); }
+
+        /* 页面头部 */
+        .page-header { padding: 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ebeef5;}
+        .page-title { font-size: 18px; color: #303133; font-weight: 500; }
+        .btn-add { padding: 8px 20px; background: #409EFF; color: #fff; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; transition: 0.2s; }
+        .btn-add:hover { background: #66b1ff; }
+
+        /* 搜索工具栏 */
+        .search-toolbar { padding: 20px; display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #ebeef5; }
+        .search-inputs { display: flex; gap: 20px; }
+        .input-group { display: flex; flex-direction: column; gap: 8px; }
+        .input-group label { font-size: 13px; color: #606266; }
+        .input-group input { height: 32px; width: 220px; padding: 0 10px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 13px; outline: none; transition: 0.2s;}
+        .input-group input:focus { border-color: #409EFF; }
+        .search-actions { display: flex; gap: 10px; }
+        .btn-search { padding: 0 20px; height: 32px; background: #409EFF; color: #fff; border: none; border-radius: 4px; font-size: 14px; cursor: pointer; }
+        .btn-search:hover { background: #66b1ff; }
+        .btn-clear { padding: 0 20px; height: 32px; background: #fff; color: #606266; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 14px; cursor: pointer; }
+        .btn-clear:hover { color: #409EFF; border-color: #c6e2ff; background-color: #ecf5ff; }
+
+        /* 统计条 */
+        .data-bar { padding: 10px 20px; background: #e6f1fc; font-size: 13px; color: #409EFF; display: flex; justify-content: space-between; border-left: 4px solid #409EFF; border-radius: 4px 4px 0 0; }
+
+        /* 表格容器 */
+        .table-card { border-radius: 0 0 4px 4px; overflow: hidden;}
+        .table-header { padding: 15px 20px; font-size: 15px; font-weight: bold; color: #303133; display: flex; align-items: center; background: #fff;}
+        .table-header::before { content: ''; display: inline-block; width: 4px; height: 16px; background: #409EFF; margin-right: 8px; border-radius: 2px;}
+
+        table { width: 100%; border-collapse: collapse; text-align: left; background: #fff;}
+        th { background-color: #fafafa; color: #606266; font-size: 14px; font-weight: bold; padding: 12px 20px; border-bottom: 1px solid #ebeef5; border-top: 1px solid #ebeef5;}
+        td { padding: 12px 20px; border-bottom: 1px solid #ebeef5; font-size: 14px; color: #606266; }
+        tr:hover { background-color: #f5f7fa; }
+
+        /* 操作按钮 */
+        .op-btns { display: flex; gap: 8px; }
+        .btn-sm { padding: 5px 12px; border-radius: 4px; font-size: 13px; cursor: pointer; border: 1px solid transparent; transition: 0.2s;}
+        .btn-edit { background: #409EFF; color: #fff; }
+        .btn-edit:hover { background: #66b1ff; }
+        .btn-delete { background: #F56C6C; color: #fff; }
+        .btn-delete:hover { background: #f78989; }
+
+        /* 状态标签 */
+        .tag { padding: 2px 8px; border-radius: 3px; font-size: 12px; border: 1px solid transparent;}
+        .tag-success { background: #f0f9eb; border-color: #e1f3d8; color: #67c23a; }
+        .tag-danger { background: #fef0f0; border-color: #fde2e2; color: #f56c6c; }
+        .tag-warning { background: #fdf6ec; border-color: #faecd8; color: #e6a23c; }
+        .tag-info { background: #f4f4f5; border-color: #e9e9eb; color: #909399; }
+
+        /* 分页 */
+        .pagination { display: flex; justify-content: flex-end; align-items: center; gap: 8px; padding: 20px; font-size: 13px; color: #606266; background: #fff;}
+        .pagination button { min-width: 30px; height: 28px; border: 1px solid #dcdfe6; background: #fff; border-radius: 4px; cursor: pointer; transition: 0.2s;}
+        .pagination button:hover { color: #409EFF; border-color: #409EFF;}
+        .pagination button.active { background: #409EFF; color: #fff; border-color: #409EFF;}
+        .pagination button:disabled { background: #f5f7fa; color: #c0c4cc; cursor: not-allowed; border-color: #ebeef5;}
 
         /* 弹窗 */
-        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;}
-        .modal-content { background: #fff; padding: 25px; border-radius: 8px; width: 400px; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 8px; color: #555; font-size: 14px; }
-        .form-group input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; outline: none; }
-        .form-group input:focus { border-color: #3498db; }
-        .modal-actions { text-align: right; margin-top: 25px; }
+        .modal-mask { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000;}
+        .modal-box { background: #fff; border-radius: 4px; width: 600px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,.1);}
+        .modal-title { font-size: 18px; color: #303133; margin-bottom: 20px; font-weight: bold;}
+        .form-row { display: flex; gap: 20px; margin-bottom: 18px; }
+        .form-group { flex: 1; display: flex; flex-direction: column; gap: 8px;}
+        .form-group label { font-size: 14px; color: #606266;}
+        .form-group input, .form-group select { width: 100%; height: 36px; padding: 0 10px; border: 1px solid #dcdfe6; border-radius: 4px; outline: none; font-size: 14px;}
+        .form-group input:focus, .form-group select:focus { border-color: #409EFF;}
+        .radio-group { display: flex; gap: 15px; align-items: center; height: 36px; font-size: 14px;}
+        .modal-footer { text-align: right; margin-top: 30px; border-top: 1px solid #ebeef5; padding-top: 20px;}
+
     </style>
 </head>
 <body>
+    <!-- 左侧边栏 -->
     <div class="sidebar">
-        <h2>PlateScope 后台</h2>
-        <ul>
-            <!-- 使用 onclick 切换页面 -->
-            <li id="tab-whitelist" class="active" onclick="switchTab('whitelist')">业主白名单管理</li>
-            <li id="tab-records" onclick="switchTab('records')">临停车辆记录</li>
-            <li id="tab-export" onclick="switchTab('export')">数据报表导出</li>
+        <div class="sidebar-logo"><span>🅿️</span> PlateScope</div>
+        <ul class="menu-list">
+            <li id="tab-whitelist" class="menu-item active" onclick="switchTab('whitelist')">
+                <span class="menu-icon">👤</span> 业主白名单管理
+            </li>
+            <li id="tab-records" class="menu-item" onclick="switchTab('records')">
+                <span class="menu-icon">🕒</span> 临停车辆记录
+            </li>
+            <li id="tab-export" class="menu-item" onclick="switchTab('export')">
+                <span class="menu-icon">📊</span> 数据报表分析
+            </li>
         </ul>
     </div>
 
+    <!-- 右侧内容区 -->
     <div class="content">
-        <div class="header">
-            <h1 id="page-title">固定车位业主白名单</h1>
-            <div class="user-info">管理员：Admin <a href="/logout">退出登录</a></div>
+        <!-- 顶部导航 -->
+        <div class="top-nav">
+            <div class="breadcrumb">首页 <span>/</span> <span id="breadcrumb-text">业主白名单管理</span></div>
+            <div class="user-info">
+                <span>Admin</span>
+                <span class="user-tag">超级管理员</span>
+                <button class="btn-logout" onclick="window.location.href='/logout'">退出登录</button>
+            </div>
         </div>
 
-        <!-- 页面 1：白名单管理 -->
-        <div id="view-whitelist" class="page-view active">
-            <div class="action-bar">
-                <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="输入车牌号或姓名...">
-                    <button class="btn" onclick="fetchWhitelist(1)">查询</button>
+        <div class="main-wrapper">
+            <!-- 页面1：白名单管理 -->
+            <div id="view-whitelist" class="page-view active">
+                <!-- 标题头部 -->
+                <div class="card page-header">
+                    <div class="page-title">业主白名单管理</div>
+                    <button class="btn-add" onclick="openModal('add')">新增业主</button>
                 </div>
-                <button class="btn btn-add" onclick="openModal()">+ 添加白名单</button>
-            </div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>车牌号</th>
-                            <th>业主姓名</th>
-                            <th>月租到期时间</th>
-                            <th>缴费记录说明</th>
-                        </tr>
-                    </thead>
-                    <tbody id="whitelistBody"></tbody>
-                </table>
-                <div class="pagination" id="pagination"></div>
-            </div>
-        </div>
 
-        <!-- 页面 2：临停车辆记录 -->
-        <div id="view-records" class="page-view">
-            <div class="action-bar">
-                <div class="search-box">
-                    <input type="text" id="searchPlateInput" placeholder="按车牌搜索历史...">
-                    <button class="btn" onclick="fetchRecords(1)">查询</button>
+                <!-- 搜索 -->
+                <div class="card search-toolbar">
+                    <div class="search-inputs">
+                        <div class="input-group">
+                            <label>综合检索</label>
+                            <input type="text" id="searchInput" placeholder="输入车牌、姓名或楼号">
+                        </div>
+                    </div>
+                    <div class="search-actions">
+                        <button class="btn-search" onclick="fetchWhitelist(1)">查找</button>
+                        <button class="btn-clear" onclick="document.getElementById('searchInput').value=''; fetchWhitelist(1)">清空条件</button>
+                    </div>
+                </div>
+
+                <!-- 统计条 -->
+                <div class="data-bar">
+                    <div>共 <span id="wl-total" style="font-weight:bold;">0</span> 条记录</div>
+                    <div>每页 7 条，第 <span id="wl-page">1</span> / <span id="wl-pages">1</span> 页</div>
+                </div>
+
+                <!-- 表格 -->
+                <div class="card table-card">
+                    <div class="table-header">业主列表</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>车牌号</th>
+                                <th>业主姓名</th>
+                                <th>联系电话</th>
+                                <th>家庭住址</th>
+                                <th>月租状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="whitelistBody"></tbody>
+                    </table>
+                    <div class="pagination" id="wl-pagination"></div>
                 </div>
             </div>
-            <div class="table-container">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>车牌号</th>
-                            <th>入场时间</th>
-                            <th>出场时间</th>
-                            <th>停车时长</th>
-                            <th>收费金额</th>
-                        </tr>
-                    </thead>
-                    <tbody id="recordsBody"></tbody>
-                </table>
-                <div class="pagination" id="recordPagination"></div>
+
+            <!-- 页面2：临停记录 -->
+            <div id="view-records" class="page-view">
+                <div class="card page-header">
+                    <div class="page-title">临停车辆历史记录</div>
+                </div>
+
+                <div class="card search-toolbar">
+                    <div class="search-inputs">
+                        <div class="input-group">
+                            <label>车牌号码</label>
+                            <input type="text" id="searchPlateInput" placeholder="输入车牌片段查询">
+                        </div>
+                        <div class="input-group">
+                            <label>车主电话</label>
+                            <input type="text" id="searchPhoneInput" placeholder="输入手机号查询">
+                        </div>
+                    </div>
+                    <div class="search-actions">
+                        <button class="btn-search" onclick="fetchRecords(1)">查找</button>
+                        <button class="btn-clear" onclick="document.getElementById('searchPlateInput').value=''; document.getElementById('searchPhoneInput').value=''; fetchRecords(1)">清空条件</button>
+                    </div>
+                </div>
+
+                <div class="data-bar">
+                    <div>共 <span id="rec-total" style="font-weight:bold;">0</span> 条记录</div>
+                    <div>每页 7 条，第 <span id="rec-page">1</span> / <span id="rec-pages">1</span> 页</div>
+                </div>
+
+                <div class="card table-card">
+                    <div class="table-header">流水列表</div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>流水号</th>
+                                <th>车牌号</th>
+                                <th>车主电话</th>
+                                <th>入场时间</th>
+                                <th>出场时间</th>
+                                <th>时长</th>
+                                <th>收费金额</th>
+                                <th>状态</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recordsBody"></tbody>
+                    </table>
+                    <div class="pagination" id="rec-pagination"></div>
+                </div>
+            </div>
+
+            <!-- 页面3：数据分析 -->
+            <div id="view-export" class="page-view">
+                <div class="card page-header">
+                    <div class="page-title">数据报表分析</div>
+                    <button class="btn-add" style="background: #e6a23c;" onclick="exportData()">导出全量流水 (CSV)</button>
+                </div>
+                <div class="card" style="padding: 20px;">
+                    <div class="table-header" style="padding-left: 0;">近 7 天营收趋势</div>
+                    <div id="adminRevenueChart" style="width: 100%; height: 400px;"></div>
+                </div>
             </div>
         </div>
-
-        <!-- 页面 3：数据报表导出 -->
-        <div id="view-export" class="page-view">
-            <div style="background: #fff; padding: 40px; border-radius: 8px; text-align: center;">
-                <h3 style="margin-bottom: 20px; color: #333;">点击下方按钮导出所有临停车辆流水</h3>
-                <p style="color: #666; margin-bottom: 30px;">系统将把 SQLite 数据库中的数据转换为标准 CSV 格式文件，方便进一步进行 Excel 数据分析。</p>
-                <button class="btn btn-export" onclick="exportData()" style="padding: 15px 40px; font-size: 18px;">📥 一键导出 CSV 报表</button>
-            </div>
-        </div>
-
     </div>
 
-    <!-- 添加弹窗 -->
-    <div class="modal" id="addModal">
-        <div class="modal-content">
-            <h3>录入新业主车位</h3>
-            <div class="form-group"><label>车牌号</label><input type="text" id="addPlate" placeholder="如：粤BGK9689"></div>
-            <div class="form-group"><label>业主姓名</label><input type="text" id="addOwner" placeholder="请输入姓名"></div>
-            <div class="form-group"><label>月租到期时间</label><input type="date" id="addExpire"></div>
-            <div class="form-group"><label>缴费说明</label><input type="text" id="addHistory" value="已缴纳半年停车费"></div>
-            <div class="modal-actions">
-                <button class="btn" style="background:#bdc3c7;" onclick="closeModal()">取消</button>
-                <button class="btn btn-add" onclick="submitForm()">确认添加</button>
+    <!-- 弹窗 -->
+    <div class="modal-mask" id="dataModal">
+        <div class="modal-box">
+            <div class="modal-title" id="modalTitle">新增业主信息</div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>车牌号 *</label>
+                    <input type="text" id="addPlate" placeholder="如：粤BGK9689">
+                </div>
+                <div class="form-group">
+                    <label>业主姓名 *</label>
+                    <input type="text" id="addOwner" placeholder="请输入姓名">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>联系电话 *</label>
+                    <input type="tel" id="addPhone" placeholder="11位手机号">
+                </div>
+                <div class="form-group">
+                    <label>月租到期时间 *</label>
+                    <input type="date" id="addExpire">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>楼栋</label>
+                    <select id="addBuilding">
+                        <option value="1栋">1栋</option><option value="2栋">2栋</option>
+                        <option value="3栋">3栋</option><option value="4栋">4栋</option><option value="5栋">5栋</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>单元</label>
+                    <select id="addUnit">
+                        <option value="1单元">1单元</option><option value="2单元">2单元</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>房号</label>
+                    <select id="addRoom">
+                        <option value="101">101</option><option value="102">102</option>
+                        <option value="201">201</option><option value="202">202</option>
+                        <option value="301">301</option><option value="302">302</option>
+                        <option value="401">401</option><option value="402">402</option>
+                        <option value="501">501</option><option value="502">502</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group" style="flex: 2;">
+                    <label>缴费情况说明</label>
+                    <select id="addHistory" onchange="autoFillDate()">
+                        <option value="已一次性缴纳全年">已一次性缴纳全年</option>
+                        <option value="已缴纳半年停车费">已缴纳半年停车费</option>
+                        <option value="按月缴纳，本月已付">按月缴纳，本月已付</option>
+                        <option value="历史欠费，暂未补缴">历史欠费，暂未补缴</option>
+                    </select>
+                </div>
+                <div class="form-group" style="flex: 1;">
+                    <label>系统强制状态</label>
+                    <div class="radio-group">
+                        <label><input type="radio" name="payStatus" value="0" checked> 正常</label>
+                        <label><input type="radio" name="payStatus" value="1"> 欠费</label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-clear" onclick="closeModal()">取消</button>
+                <button class="btn-search" onclick="submitForm()" style="margin-left: 10px;">确认提交</button>
             </div>
         </div>
     </div>
 
     <script>
-        let currentPage = 1;
+        let currentWlPage = 1;
+        let isEditing = false;
+        var adminChart = echarts.init(document.getElementById('adminRevenueChart'));
 
-        // 页面 Tab 切换逻辑
+        // 切换 Tab
         function switchTab(tabName) {
             document.querySelectorAll('.page-view').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.sidebar ul li').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.menu-item').forEach(el => el.classList.remove('active'));
 
             document.getElementById('view-' + tabName).classList.add('active');
             document.getElementById('tab-' + tabName).classList.add('active');
 
-            if (tabName === 'whitelist') {
-                document.getElementById('page-title').innerText = "固定车位业主白名单";
-                fetchWhitelist(1);
-            } else if (tabName === 'records') {
-                document.getElementById('page-title').innerText = "临停车辆历史记录";
-                fetchRecords(1);
-            } else if (tabName === 'export') {
-                document.getElementById('page-title').innerText = "数据报表导出";
+            const nameMap = {'whitelist':'业主白名单管理', 'records':'临停车辆历史记录', 'export':'数据报表分析'};
+            document.getElementById('breadcrumb-text').innerText = nameMap[tabName];
+
+            if (tabName === 'whitelist') fetchWhitelist(1);
+            else if (tabName === 'records') fetchRecords(1);
+            else if (tabName === 'export') {
+                fetch('/api/stats').then(res => res.json()).then(data => {
+                    adminChart.setOption({
+                        tooltip: { trigger: 'axis' },
+                        grid: { top: 30, bottom: 30, left: 50, right: 30 },
+                        xAxis: { type: 'category', data: data.trend_dates, axisLine: {lineStyle:{color: '#dcdfe6'}}, axisLabel:{color:'#606266'} },
+                        yAxis: { type: 'value', splitLine: { lineStyle: { color: '#ebeef5', type: 'dashed' } }, axisLabel:{color:'#606266'} },
+                        series: [{ data: data.trend_incomes, type: 'line', smooth: true, itemStyle: { color: '#409EFF' }, areaStyle: { color: 'rgba(64, 158, 255, 0.2)' }, symbolSize: 8 }]
+                    });
+                });
             }
         }
 
-        // 1. 白名单管理
+        // 根据缴费说明自动推算日期
+        function autoFillDate() {
+            const historySelect = document.getElementById('addHistory').value;
+            const dateInput = document.getElementById('addExpire');
+            const today = new Date();
+            let expire = new Date();
+
+            if (historySelect === "已一次性缴纳全年") expire.setFullYear(today.getFullYear() + 1);
+            else if (historySelect === "已缴纳半年停车费") expire.setMonth(today.getMonth() + 6);
+            else if (historySelect === "按月缴纳，本月已付") expire.setMonth(today.getMonth() + 1);
+            else if (historySelect === "历史欠费，暂未补缴") {
+                expire.setMonth(today.getMonth() - 1);
+                document.querySelector('input[name="payStatus"][value="1"]').checked = true;
+            }
+
+            if(historySelect !== "历史欠费，暂未补缴"){
+                dateInput.value = expire.toISOString().split('T')[0];
+            } else {
+                dateInput.value = "2023-01-01";
+            }
+        }
+
+        // 获取白名单列表
         function fetchWhitelist(page = 1) {
-            currentPage = page;
+            currentWlPage = page;
             const search = document.getElementById('searchInput').value;
             fetch(`/api/whitelist?page=${page}&search=${search}`)
-                .then(res => {
-                    if (res.status === 401) window.location.href = '/login';
-                    return res.json();
-                })
+                .then(res => { if (res.status === 401) window.location.href = '/login'; return res.json(); })
                 .then(data => {
                     if(data.error) return;
+
+                    document.getElementById('wl-total').innerText = data.total;
+                    document.getElementById('wl-page').innerText = page;
+                    document.getElementById('wl-pages').innerText = Math.ceil(data.total / 7) || 1;
+
                     const tbody = document.getElementById('whitelistBody');
                     if (data.data.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;">暂无数据</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; color:#909399; padding:30px;">暂无数据</td></tr>';
                     } else {
-                        tbody.innerHTML = data.data.map(item => `
-                            <tr>
-                                <td style="font-weight:bold; color:#3498db;">${item.plate}</td>
-                                <td>${item.owner}</td>
-                                <td>${item.expire}</td>
-                                <td>${item.history}</td>
-                            </tr>
-                        `).join('');
+                        tbody.innerHTML = data.data.map(item => {
+                            const today = new Date().setHours(0,0,0,0);
+                            const expire = new Date(item.expire).getTime();
+
+                            let statusHtml = "";
+                            if (expire < today) statusHtml = `<span class="tag tag-danger">已欠费/过期</span>`;
+                            else if (expire - today < 7 * 24 * 3600 * 1000) statusHtml = `<span class="tag tag-warning">即将到期</span>`;
+                            else statusHtml = `<span class="tag tag-success">正常 (至 ${item.expire})</span>`;
+
+                            return `
+                                <tr>
+                                    <td style="font-weight:bold;">${item.plate}</td>
+                                    <td>${item.owner}</td>
+                                    <td>${item.phone}</td>
+                                    <td>${item.building} ${item.unit} ${item.room}</td>
+                                    <td>${statusHtml}</td>
+                                    <td>
+                                        <div class="op-btns">
+                                            <button class="btn-sm btn-edit" onclick='openModal("edit", ${JSON.stringify(item)})'>编辑</button>
+                                            <button class="btn-sm btn-delete" onclick="deleteWhitelist('${item.plate}')">删除</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            `;
+                        }).join('');
                     }
 
-                    const totalPages = Math.ceil(data.total / 8);
-                    const pagDiv = document.getElementById('pagination');
-                    pagDiv.innerHTML = '';
+                    const totalPages = Math.ceil(data.total / 7);
+                    const pagDiv = document.getElementById('wl-pagination');
+                    pagDiv.innerHTML = `<span>共 ${data.total} 条</span>`;
+                    const prevBtn = document.createElement('button'); prevBtn.innerText = '<'; prevBtn.disabled = page === 1; prevBtn.onclick = () => fetchWhitelist(page - 1); pagDiv.appendChild(prevBtn);
+
                     for (let i = 1; i <= totalPages; i++) {
-                        const btn = document.createElement('button');
-                        btn.innerText = i;
-                        if (i === page) btn.className = 'active';
-                        btn.onclick = () => fetchWhitelist(i);
-                        pagDiv.appendChild(btn);
+                        if(i === 1 || i === totalPages || Math.abs(i - page) <= 1) {
+                            const btn = document.createElement('button');
+                            btn.innerText = i; if (i === page) btn.className = 'active';
+                            btn.onclick = () => fetchWhitelist(i); pagDiv.appendChild(btn);
+                        } else if (i === 2 || i === totalPages - 1) {
+                            const span = document.createElement('span'); span.innerText = '...'; pagDiv.appendChild(span);
+                        }
                     }
+                    const nextBtn = document.createElement('button'); nextBtn.innerText = '>'; nextBtn.disabled = page === totalPages || totalPages === 0; nextBtn.onclick = () => fetchWhitelist(page + 1); pagDiv.appendChild(nextBtn);
                 });
         }
 
-        // 2. 临停记录查询
+        // 删除白名单
+        function deleteWhitelist(plate) {
+            if(!confirm(`确认要删除该车牌号 (${plate}) 的业主信息吗？`)) return;
+            fetch(`/api/whitelist?plate=${plate}`, { method: 'DELETE' })
+                .then(res => res.json()).then(data => {
+                    if(data.success) { alert('删除成功'); fetchWhitelist(currentWlPage); }
+                });
+        }
+
+        // 获取临停记录（包含在场/出场状态区分）
         function fetchRecords(page = 1) {
-            const search = document.getElementById('searchPlateInput').value;
-            fetch(`/api/records?page=${page}&search=${search}`)
+            const searchPlate = document.getElementById('searchPlateInput').value;
+            const searchPhone = document.getElementById('searchPhoneInput').value;
+
+            fetch(`/api/records?page=${page}&plate=${searchPlate}&phone=${searchPhone}`)
                 .then(res => res.json())
                 .then(data => {
+                    document.getElementById('rec-total').innerText = data.total;
+                    document.getElementById('rec-page').innerText = page;
+                    document.getElementById('rec-pages').innerText = Math.ceil(data.total / 7) || 1;
+
                     const tbody = document.getElementById('recordsBody');
                     if (data.data.length === 0) {
-                        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">暂无记录</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:#909399; padding:30px;">暂无记录</td></tr>';
                     } else {
-                        tbody.innerHTML = data.data.map(item => `
-                            <tr>
-                                <td>${item.id}</td>
-                                <td style="font-weight:bold; color:#3498db;">${item.plate}</td>
-                                <td>${item.entry}</td>
-                                <td>${item.exit}</td>
-                                <td>${item.duration} 小时</td>
-                                <td style="color:#e74c3c; font-weight:bold;">${item.fee} 元</td>
-                            </tr>
-                        `).join('');
+                        tbody.innerHTML = data.data.map(item => {
+                            let statusHtml = item.is_inside === 1
+                                ? `<span class="tag tag-danger">在场中</span>`
+                                : `<span class="tag tag-info">已出场</span>`;
+
+                            // 在场车辆：没有出场时间、时长、费用，手机号待录入或已输入
+                            if (item.is_inside === 1) {
+                                let phoneHtml = item.phone === '待录入'
+                                    ? `<span style="color:#e6a23c; font-weight:bold;">待录入</span>`
+                                    : item.phone;
+                                return `
+                                    <tr>
+                                        <td>-</td>
+                                        <td style="font-weight:bold;">${item.plate}</td>
+                                        <td>${phoneHtml}</td>
+                                        <td>${item.entry}</td>
+                                        <td style="color:#c0c4cc;">--:--:--</td>
+                                        <td style="color:#c0c4cc;">--</td>
+                                        <td style="color:#c0c4cc;">--</td>
+                                        <td>${statusHtml}</td>
+                                    </tr>
+                                `;
+                            } else {
+                                // 已出场车辆：显示完整计费信息
+                                let phoneHtml = item.phone !== "未登记" ? item.phone : `<span style="color:#c0c4cc;">--</span>`;
+                                return `
+                                    <tr>
+                                        <td>${item.id}</td>
+                                        <td style="font-weight:bold;">${item.plate}</td>
+                                        <td>${phoneHtml}</td>
+                                        <td>${item.entry}</td>
+                                        <td>${item.exit}</td>
+                                        <td>${item.duration} 小时</td>
+                                        <td style="color:#F56C6C; font-weight:bold;">${item.fee} 元</td>
+                                        <td>${statusHtml}</td>
+                                    </tr>
+                                `;
+                            }
+                        }).join('');
                     }
 
-                    const totalPages = Math.ceil(data.total / 8);
-                    const pagDiv = document.getElementById('recordPagination');
-                    pagDiv.innerHTML = '';
+                    const totalPages = Math.ceil(data.total / 7);
+                    const pagDiv = document.getElementById('rec-pagination');
+                    pagDiv.innerHTML = `<span>共 ${data.total} 条</span>`;
+                    const prevBtn = document.createElement('button'); prevBtn.innerText = '<'; prevBtn.disabled = page === 1; prevBtn.onclick = () => fetchRecords(page - 1); pagDiv.appendChild(prevBtn);
+
                     for (let i = 1; i <= totalPages; i++) {
-                        const btn = document.createElement('button');
-                        btn.innerText = i;
-                        if (i === page) btn.className = 'active';
-                        btn.onclick = () => fetchRecords(i);
-                        pagDiv.appendChild(btn);
+                        if(i === 1 || i === totalPages || Math.abs(i - page) <= 1) {
+                            const btn = document.createElement('button');
+                            btn.innerText = i; if (i === page) btn.className = 'active';
+                            btn.onclick = () => fetchRecords(i); pagDiv.appendChild(btn);
+                        } else if (i === 2 || i === totalPages - 1) {
+                            const span = document.createElement('span'); span.innerText = '...'; pagDiv.appendChild(span);
+                        }
                     }
+                    const nextBtn = document.createElement('button'); nextBtn.innerText = '>'; nextBtn.disabled = page === totalPages || totalPages === 0; nextBtn.onclick = () => fetchRecords(page + 1); pagDiv.appendChild(nextBtn);
                 });
         }
 
-        // 3. 导出数据
-        function exportData() {
-            window.location.href = '/api/export';
+        function exportData() { window.location.href = '/api/export'; }
+
+        // 打开新增/编辑弹窗
+        function openModal(mode, data = null) {
+            const modal = document.getElementById('dataModal');
+            const plateInput = document.getElementById('addPlate');
+
+            if (mode === 'edit') {
+                isEditing = true;
+                document.getElementById('modalTitle').innerText = "编辑业主信息";
+                plateInput.value = data.plate;
+                plateInput.disabled = true;
+                document.getElementById('addOwner').value = data.owner;
+                document.getElementById('addPhone').value = data.phone;
+                document.getElementById('addExpire').value = data.expire;
+                document.getElementById('addBuilding').value = data.building;
+                document.getElementById('addUnit').value = data.unit;
+                document.getElementById('addRoom').value = data.room;
+                document.getElementById('addHistory').value = data.history;
+
+                if(new Date(data.expire) < new Date().setHours(0,0,0,0)){
+                    document.querySelector('input[name="payStatus"][value="1"]').checked = true;
+                } else {
+                    document.querySelector('input[name="payStatus"][value="0"]').checked = true;
+                }
+            } else {
+                isEditing = false;
+                document.getElementById('modalTitle').innerText = "新增业主信息";
+                plateInput.value = '';
+                plateInput.disabled = false;
+                document.getElementById('addOwner').value = '';
+                document.getElementById('addPhone').value = '';
+                document.querySelector('input[name="payStatus"][value="0"]').checked = true;
+                autoFillDate();
+            }
+            modal.style.display = 'flex';
         }
 
-        // 弹窗逻辑
-        function openModal() { document.getElementById('addModal').style.display = 'flex'; }
-        function closeModal() { document.getElementById('addModal').style.display = 'none'; }
+        function closeModal() { document.getElementById('dataModal').style.display = 'none'; }
 
         function submitForm() {
             const plate = document.getElementById('addPlate').value.toUpperCase().replace('·','');
             const owner = document.getElementById('addOwner').value;
+            const phone = document.getElementById('addPhone').value;
             const expire = document.getElementById('addExpire').value;
+            const building = document.getElementById('addBuilding').value;
+            const unit = document.getElementById('addUnit').value;
+            const room = document.getElementById('addRoom').value;
             const history = document.getElementById('addHistory').value;
+            const status = document.querySelector('input[name="payStatus"]:checked').value;
 
-            if(!plate || !owner || !expire) return alert("请填写完整信息！");
+            if(!plate || !owner || !phone || !expire) return alert("请填写所有必填项！");
+
+            const payload = {plate, owner, expire, history, phone, building, unit, room, status};
 
             fetch('/api/whitelist', {
-                method: 'POST',
+                method: isEditing ? 'PUT' : 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({plate, owner, expire, history})
+                body: JSON.stringify(payload)
             }).then(res => res.json()).then(data => {
                 if(data.success) {
-                    alert('添加成功！');
-                    closeModal();
-                    fetchWhitelist(1);
-                } else {
-                    alert('添加失败：' + data.msg);
+                    alert(isEditing ? '修改成功！' : '添加成功！');
+                    closeModal(); fetchWhitelist(1);
                 }
+                else { alert('操作失败：' + data.msg); }
             });
         }
 
-        // 初始化加载
+        // 初始化
         fetchWhitelist(1);
     </script>
 </body>
